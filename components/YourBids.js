@@ -1,94 +1,121 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator } from 'react-native';
-import { auth, database } from '../firebase';
-import { ref, onValue, get } from 'firebase/database';
+import { View, Text, FlatList, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import { getDatabase, ref as dbRef, get } from 'firebase/database';
+import { getAuth } from 'firebase/auth';
+import { useNavigation } from '@react-navigation/native';
 import COLORS from '../constants/colors';
 
-const YourBids = () => {
+const YourBidsScreen = () => {
   const [bids, setBids] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
+  const auth = getAuth();
+  const navigation = useNavigation();
 
   useEffect(() => {
-    const fetchUser = async () => {
-      const currentUser = auth.currentUser;
-      setUser(currentUser);
-    };
+    const fetchBids = async () => {
+      const user = auth.currentUser;
 
-    fetchUser();
-  }, []);
+      if (!user) {
+        console.log('No user is currently authenticated');
+        setLoading(false);
+        return;
+      }
 
-  useEffect(() => {
-    if (user) {
-      const userBidsRef = ref(database, `bids/${user.uid}`);
+      try {
+        const db = getDatabase();
+        const bidsRef = dbRef(db, 'bids/');
+        const snapshot = await get(bidsRef);
 
-      const fetchBids = () => {
-        onValue(userBidsRef, async (snapshot) => {
-          const bidsData = [];
-          const promises = [];
+        if (snapshot.exists()) {
+          const bidsData = snapshot.val();
+          const userBids = [];
 
-          snapshot.forEach((childSnapshot) => {
-            const bidData = childSnapshot.val();
-            if (!bidData) {return;}
-
-            const adRef = ref(database, `ads/${bidData.productId}`);
-            promises.push(
-              get(adRef).then((adSnapshot) => {
-                const adData = adSnapshot.val();
-                if (adData && adData.minimumBidPrice !== undefined && adData.productName) {
-                  bidsData.push({
-                    ...bidData,
-                    highestBid: adData.minimumBidPrice,
-                    productName: adData.productName,
-                  });
-                }
-              }).catch((error) => {
-                console.error(`Error fetching ad data for productId ${bidData.productId}: `, error);
-              })
-            );
+          Object.keys(bidsData).forEach(productId => {
+            Object.keys(bidsData[productId]).forEach(bidId => {
+              const bid = bidsData[productId][bidId];
+              if (bid.userId === user.uid) {
+                userBids.push({
+                  id: bidId,
+                  productId,
+                  ...bid,
+                });
+              }
+            });
           });
 
-          await Promise.all(promises);
-          const sortedBids = bidsData.sort((a, b) => b.bidAmount - a.bidAmount);
-          const userBids = sortedBids.filter(bid => bid.userId === user.uid);
-
           setBids(userBids);
-          setLoading(false);
-        });
-      };
+        } else {
+          console.log('No bids found for this user');
+        }
+      } catch (error) {
+        console.error('Error fetching bids:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-      fetchBids();
-    }
-  }, [user]);
+    fetchBids();
+  }, []);
+
+  const handleAcceptedBidPress = (bid) => {
+    const deposit = bid.bidAmount * 0.1;
+
+    Alert.alert(
+      "Confirm Your Bid",
+      `Are you sure you want to proceed with this bid? A deposit of 10% (${deposit} units) will be required. Please note that this amount is refundable, but it will be held until you confirm the product. Make sure to inspect the product in person.`,
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Proceed",
+          onPress: () => {
+            // Navigate to a screen where the payment simulation will occur
+            navigation.navigate('PaymentSimulationScreen', { bid, deposit });
+          }
+        }
+      ]
+    );
+  };
 
   if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-      </View>
-    );
+    return <Text>Loading...</Text>;
   }
+
+  if (!bids.length) {
+    return <Text>No bids found.</Text>;
+  }
+
+  const getStatusStyle = (status) => {
+    switch (status) {
+      case 'accepted':
+        return styles.acceptedBid;
+      case 'rejected':
+        return styles.rejectedBid;
+      default:
+        return styles.pendingBid;
+    }
+  };
 
   return (
     <View style={styles.container}>
-      {bids.length === 0 ? (
-        <Text style={styles.noBidsText}>You have no current bids</Text>
-      ) : (
-        <FlatList
-          data={bids}
-          keyExtractor={(item) => item.productId}
-          renderItem={({ item, index }) => (
-            <View style={styles.card}>
-              <Text style={styles.title}>{item.productName}</Text>
-              <Text>Your Bid: {item.bidAmount}</Text>
-              <Text>Highest Bid: {item.highestBid}</Text>
-              <Text>
-                {index === 0 ? 'You are the highest bidder!' : `Your rank: ${index + 1}`}
-              </Text>
+      <FlatList
+        data={bids}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={[styles.bidItem, getStatusStyle(item.status)]}
+            onPress={() => item.status === 'accepted' ? handleAcceptedBidPress(item) : null}
+          >
+            <View style={styles.bidDetails}>
+              <Text style={styles.bidTitle}>{item.productName}</Text>
+              <Text>Bid Amount: {item.bidAmount}</Text>
+              <Text>Status: {item.status || 'Pending'}</Text>
             </View>
-          )}
-        />
-      )}
+          </TouchableOpacity>
+        )}
+      />
     </View>
   );
 };
@@ -96,37 +123,43 @@ const YourBids = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
-    backgroundColor: '#fff',
+    padding: 20,
   },
-  loadingContainer: {
+  bidItem: {
+    flexDirection: 'row',
+    padding: 15,
+    marginBottom: 10,
+    borderRadius: 10,
+    shadowColor: '#000',  // Shadow color
+    shadowOffset: { width: 0, height: 2 },  // Shadow offset (x, y)
+    shadowOpacity: 0.2,  // Shadow opacity
+    shadowRadius: 4,  // Shadow radius
+    elevation: 5,  // Elevation (for Android shadow)
+  },
+  bidDetails: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
   },
-  noBidsText: {
-    textAlign: 'center',
-    fontSize: 18,
-    color: COLORS.primary,
-    marginTop: 20,
-  },
-  card: {
-    backgroundColor: '#f9f9f9',
-    padding: 16,
-    marginVertical: 8,
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  title: {
+  bidTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: COLORS.primary,
-    marginBottom: 8,
+    marginBottom: 5,
+  },
+  acceptedBid: {
+    backgroundColor: '#d4edda', // Light green background
+    borderColor: '#28a745', // Darker green border
+    borderWidth: 1,
+  },
+  rejectedBid: {
+    backgroundColor: '#f8d7da', // Light red/pink background
+    borderColor: '#dc3545', // Darker red border
+    borderWidth: 1,
+  },
+  pendingBid: {
+    backgroundColor: '#fff3cd', // Light yellow background
+    borderColor: '#ffc107', // Darker yellow border
+    borderWidth: 1,
   },
 });
 
-export default YourBids;
+export default YourBidsScreen;

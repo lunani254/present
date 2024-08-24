@@ -1,367 +1,235 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, Image, FlatList, StyleSheet } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { View, Text, TextInput, Pressable, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { getAuth } from 'firebase/auth';
-import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import Checkbox from 'expo-checkbox';
+import Button from '../components/Button';
 import COLORS from '../constants/colors';
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { auth } from '../firebase';
 
-// Firebase initialization
-const firestore = getFirestore();
-const storage = getStorage();
-const auth = getAuth();
+const Signup = ({ navigation }) => {
+  const [firstName, setFirstName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isPasswordShown, setIsPasswordShown] = useState(false);
+  const [isChecked, setIsChecked] = useState(false);
 
-const PostAdScreen = () => {
-  const navigation = useNavigation();
-  const [productName, setProductName] = useState('');
-  const [productDescription, setProductDescription] = useState('');
-  const [location, setLocation] = useState('');
-  const [minimumBidPrice, setMinimumBidPrice] = useState('');
-  const [selectedImages, setSelectedImages] = useState(['', '', '']);
-  const [uploading, setUploading] = useState(false);
-
-  const handleImagePicker = async (index) => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permissionResult.granted) {
-      Alert.alert('Permission to access camera roll is required!');
+  const handleSignup = async () => {
+    if (!isChecked) {
+      Alert.alert("Terms and Conditions", "You must agree to the terms and conditions to sign up.");
       return;
     }
 
-    const pickerResult = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false, // Disable editing to avoid cropping
-      quality: 1,
-    });
-
-    if (!pickerResult.cancelled && pickerResult.assets && pickerResult.assets.length > 0) {
-      const uri = pickerResult.assets[0].uri;
-      const updatedImages = [...selectedImages];
-      updatedImages[index] = uri;
-      setSelectedImages(updatedImages);
-    }
-  };
-
-  const handleDeleteImage = (index) => {
-    const updatedImages = [...selectedImages];
-    updatedImages[index] = '';
-    setSelectedImages(updatedImages);
-  };
-
-  const validateForm = () => {
-    if (!productName || !productDescription || !location || !minimumBidPrice) {
-      return false;
-    }
-    if (!selectedImages.some(image => image !== '')) {
-      return false;
-    }
-    return true;
-  };
-
-  const handleSubmit = async () => {
-    if (!validateForm()) {
-      Alert.alert('Error!', 'All fields and at least one image are required.');
-      return;
-    }
-
-    if (!location) {
-      Alert.alert('Error!', 'Location is not set. Please select a valid location.');
-      console.error('Error: Location is undefined.');
-      return;
-    }
-
-    setUploading(true);
     try {
-      const uploadedImageUrls = await uploadImages(selectedImages);
-
-      const adData = {
-        userId: auth.currentUser?.uid,
-        productName,
-        productDescription,
-        location,
-        minimumBidPrice,
-        imageUrls: uploadedImageUrls,
-        timestamp: serverTimestamp(),
-      };
-
-      await addDoc(collection(firestore, 'ads'), adData);
-
-      Alert.alert('Success!', 'Your ad has been posted successfully.');
-      navigation.goBack();
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      Alert.alert("Signup Successful", "You have successfully signed up!");
+      navigation.navigate('Login');
     } catch (error) {
-      console.error('Error adding document:', error.message);
-      Alert.alert('Error!', `Failed to post your ad: ${error.message}`);
-    } finally {
-      setUploading(false);
+      Alert.alert("Signup Failed", error.message);
     }
-  };
-
-  const uploadImages = async (images) => {
-    const uploadedImageUrls = [];
-    for (const imageUri of images) {
-      if (imageUri) {
-        try {
-          const blob = await uriToBlob(imageUri);
-
-          const fileRef = storageRef(storage, `images/${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-          await uploadBytes(fileRef, blob);
-
-          const downloadUrl = await getDownloadURL(fileRef);
-          uploadedImageUrls.push(downloadUrl);
-          console.log(`Image uploaded successfully: ${downloadUrl}`);
-        } catch (error) {
-          console.error('Error uploading image:', error.message);
-          Alert.alert('Error!', `Failed to upload an image: ${error.message}`);
-          setUploading(false);
-          throw error;
-        }
-      }
-    }
-    return uploadedImageUrls;
-  };
-
-  const uriToBlob = async (uri) => {
-    const response = await fetch(uri);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image at ${uri}: ${response.statusText}`);
-    }
-    return await response.blob();
   };
 
   return (
-    <FlatList
-      data={[{ key: 'form' }]}
-      renderItem={({ item }) => (
-        <View key={item.key} style={styles.container}>
-          <TouchableOpacity
-            onPress={() => !uploading && navigation.goBack()}
-            style={styles.backButton}
-            disabled={uploading}
-          >
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.heading}>Post Your Ad</Text>
+    <LinearGradient style={styles.container} colors={[COLORS.secondary, COLORS.primary]}>
+      <SafeAreaView style={styles.innerContainer}>
+        <View style={styles.content}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Create Account</Text>
+            <Text style={styles.headerSubtitle}> Connect and bid today!</Text>
+          </View>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Product Name"
-            value={productName}
-            onChangeText={setProductName}
-          />
-          <TextInput
-            style={[styles.input, styles.multilineInput]}
-            placeholder="Product Description"
-            value={productDescription}
-            onChangeText={setProductDescription}
-            multiline={true}
-            numberOfLines={4}
-          />
-
-          <GooglePlacesAutocomplete
-            placeholder="Search for location"
-            onPress={(data, details = null) => {
-              console.log('Selected location data:', data.description);
-              setLocation(data.description);
-            }}
-            query={{
-              key: 'AIzaSyDsshE3f6cy8e2vnaZuOf-Ig_muEYyHMzI',
-              language: 'en',
-              types: 'geocode',
-            }}
-            styles={{
-              textInputContainer: styles.autocompleteContainer,
-              textInput: styles.input,
-              listView: styles.listView,
-            }}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Minimum Bid Price"
-            value={minimumBidPrice}
-            onChangeText={setMinimumBidPrice}
-            keyboardType="numeric"
-          />
-
-          <View style={styles.imageGrid}>
-            <TouchableOpacity
-              style={[styles.imagePicker, styles.largeImagePicker]}
-              onPress={() => handleImagePicker(0)}
-            >
-              {selectedImages[0] ? (
-                <>
-                  <Image source={{ uri: selectedImages[0] }} style={styles.selectedImage} />
-                  <TouchableOpacity
-                    style={styles.deleteIconLarge}
-                    onPress={() => handleDeleteImage(0)}
-                  >
-                    <Ionicons name="trash" size={24} color="red" />
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <Text style={styles.imagePickerText}>Add Image</Text>
-              )}
-            </TouchableOpacity>
-
-            <View style={styles.smallImagesContainer}>
-              {[1, 2].map(index => (
-                <TouchableOpacity
-                  key={index}
-                  style={[styles.imagePicker, styles.smallImagePicker]}
-                  onPress={() => handleImagePicker(index)}
-                >
-                  {selectedImages[index] ? (
-                    <>
-                      <Image source={{ uri: selectedImages[index] }} style={styles.selectedImage} />
-                      <TouchableOpacity
-                        style={styles.deleteIconSmall}
-                        onPress={() => handleDeleteImage(index)}
-                      >
-                        <Ionicons name="trash" size={20} color="red" />
-                      </TouchableOpacity>
-                    </>
-                  ) : (
-                    <Text style={styles.imagePickerText}>Add Image</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>First name</Text>
+            <View style={styles.inputBox}>
+              <TextInput
+                placeholder='Enter your first name'
+                placeholderTextColor={COLORS.black}
+                style={styles.input}
+                value={firstName}
+                onChangeText={setFirstName}
+              />
             </View>
           </View>
 
-          <TouchableOpacity
-            style={styles.submitButton}
-            onPress={handleSubmit}
-            disabled={uploading || !validateForm()}
-          >
-            <Text style={styles.submitButtonText}>{uploading ? 'Uploading...' : 'Submit'}</Text>
-          </TouchableOpacity>
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Email address</Text>
+            <View style={styles.inputBox}>
+              <TextInput
+                placeholder='Enter your email address'
+                placeholderTextColor={COLORS.black}
+                keyboardType='email-address'
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+              />
+            </View>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.inputBox}>
+              <TextInput
+                placeholder='Enter your password'
+                placeholderTextColor={COLORS.black}
+                secureTextEntry={!isPasswordShown}
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+              />
+              <TouchableOpacity
+                onPress={() => setIsPasswordShown(!isPasswordShown)}
+                style={styles.eyeIcon}
+              >
+                <Ionicons
+                  name={isPasswordShown ? "eye-off" : "eye"}
+                  size={24}
+                  color={COLORS.black}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.checkboxContainer}>
+            <Checkbox
+              style={styles.checkbox}
+              value={isChecked}
+              onValueChange={setIsChecked}
+              color={isChecked ? COLORS.primary : undefined}
+            />
+            <Text>I agree to the terms and conditions</Text>
+          </View>
+
+          <Button
+            title="Sign Up"
+            filled
+            style={styles.signupButton}
+            onPress={handleSignup}
+          />
+
+          <View style={styles.dividerContainer}>
+            <View style={styles.divider} />
+            <Text style={styles.dividerText}>Or Sign up with</Text>
+            <View style={styles.divider} />
+          </View>
+
+          <View style={styles.registerContainer}>
+            <Text style={styles.registerText}>Already have an account?</Text>
+            <Pressable onPress={() => navigation.navigate("Login")}>
+              <Text style={styles.registerLink}>Log In</Text>
+            </Pressable>
+          </View>
         </View>
-      )}
-      keyExtractor={(item) => item.key}
-      contentContainerStyle={{ flexGrow: 1 }}
-      keyboardShouldPersistTaps="handled"
-    />
+      </SafeAreaView>
+    </LinearGradient>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 30,
-  },
-  backButton: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    paddingHorizontal: 15,
-    paddingVertical: 5,
-    zIndex: 1,
-    backgroundColor: `${COLORS.primary}90`,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.1)',
-  },
-  backButtonText: {
-    color: 'white',
-    fontSize: 16,
-  },
-  heading: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: COLORS.primary,
-    textAlign: 'center',
-  },
-  input: {
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
-    padding: 10,
-    marginBottom: 10,
-    backgroundColor: '#fff',
-  },
-  autocompleteContainer: {
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginBottom: 10,
-    backgroundColor: '#fff',
-    zIndex: 2,
-  },
-  listView: {
-    zIndex: 2,
-  },
-  multilineInput: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  imageGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  smallImagesContainer: {
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-  },
-  imagePicker: {
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    margin: 5,
-  },
-  largeImagePicker: {
-    width: 200,
-    height: 200,
-  },
-  smallImagePicker: {
-    width: 95,
-    height: 95,
-  },
-  imagePickerText: {
-    textAlign: 'center',
-    color: COLORS.primary,
-  },
-  selectedImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 10,
-  },
-  deleteIconLarge: {
-    position: 'absolute',
-    top: 5,
-    right: 5,
-  },
-  deleteIconSmall: {
-    position: 'absolute',
-    top: 5,
-    right: 5,
-  },
-  submitButton: {
-    width: '100%',
-    backgroundColor: COLORS.primary,
-    padding: 15,
-    borderRadius: 5,
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  submitButtonText: {
-    color: '#fff',
-    fontSize: 18,
-  },
+    container: {
+        flex: 1,
+    },
+    innerContainer: {
+        flex: 1,
+        backgroundColor: 'transparent',
+    },
+    content: {
+        flex: 1,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+    },
+    header: {
+        marginVertical: 10,
+    },
+    headerTitle: {
+        fontSize: 25,
+        fontWeight: 'bold',
+    },
+    headerSubtitle: {
+        fontSize: 15,
+        color: COLORS.grey,
+    },
+    inputContainer: {
+        marginVertical: 10,
+    },
+    label: {
+        marginBottom: 5,
+    },
+    inputBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderRadius: 8,
+        backgroundColor: COLORS.white,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        elevation: 2,
+    },
+    input: {
+        flex: 1,
+        fontSize: 16,
+        color: COLORS.black,
+    },
+    eyeIcon: {
+        marginLeft: 10,
+    },
+    checkboxContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginVertical: 10,
+    },
+    checkboxLabel: {
+        marginLeft: 8,
+        color: COLORS.grey,
+    },
+    signupButton: {
+        marginVertical: 20,
+    },
+    dividerContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginVertical: 10,
+    },
+    divider: {
+        flex: 1,
+        height: 1,
+        backgroundColor: COLORS.grey,
+    },
+    dividerText: {
+        marginHorizontal: 10,
+        color: COLORS.grey,
+    },
+    socialButtonsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+    },
+    socialButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderRadius: 8,
+        backgroundColor: COLORS.white,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        elevation: 2,
+        marginHorizontal: 4,
+    },
+    socialIcon: {
+        width: 24,
+        height: 24,
+        marginRight: 8,
+    },
+    registerContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        marginVertical: 20,
+    },
+    registerText: {
+        color: COLORS.grey,
+    },
+    registerLink: {
+        color: COLORS.primary,
+        marginLeft: 5,
+    },
 });
 
-export default PostAdScreen;
+export default Signup;

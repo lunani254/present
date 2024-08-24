@@ -58,12 +58,12 @@ const PlaceBidScreen = ({ route }) => {
   };
 
   const handleIncreaseBid = () => {
-    setBidAmount((prevBid) => prevBid + 10);
+    setBidAmount((prevBid) => prevBid + 1);
   };
 
   const handleDecreaseBid = () => {
     if (bidAmount > minimumBidPrice) {
-      setBidAmount((prevBid) => prevBid - 10);
+      setBidAmount((prevBid) => prevBid - 1);
     }
   };
 

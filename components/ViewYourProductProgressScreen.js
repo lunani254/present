@@ -1,153 +1,152 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, Image, TouchableOpacity, Alert, Pressable } from 'react-native';
-import { FontAwesome } from '@expo/vector-icons';
-import { ref, onValue, update } from 'firebase/database';
-import { database } from '../firebase';
-import COLORS from '../constants/colors';
-import Modal from 'react-native-modal';
+import { View, Text, FlatList, StyleSheet, Image, TouchableOpacity, Modal, Alert, Button } from 'react-native';
+import { getDatabase, ref as dbRef, get, update } from 'firebase/database';
 
-const ViewYourProductProgressScreen = ({ route, navigation }) => {
+const ViewYourProductProgressScreen = ({ route }) => {
   const { productId } = route.params;
   const [productDetails, setProductDetails] = useState(null);
-  const [bids, setBids] = useState([]);
-  const [selectedBid, setSelectedBid] = useState(null);
-  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [bidders, setBidders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedBidder, setSelectedBidder] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   useEffect(() => {
-    if (!productId) {
-      console.error('Product ID is missing from route params');
-      return;
-    }
+    const fetchProductDetails = async () => {
+      try {
+        const db = getDatabase();
 
-    const fetchProductDetails = () => {
-      const productRef = ref(database, `ads/${productId}`);
-      onValue(productRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-          setProductDetails(data);
-        } else {
-          setProductDetails({
-            productName: 'Product not found',
-            location: 'N/A',
-            productDescription: 'N/A',
-            minimumBidPrice: 0,
-            numberOfBidders: 0,
-            imageUrls: [],
-          });
-        }
-      });
-    };
+        // Fetch product details
+        const productRef = dbRef(db, `ads/${productId}`);
+        const productSnapshot = await get(productRef);
 
-    const fetchBids = () => {
-      const bidsRef = ref(database, `bids/${productId}`);
-      onValue(bidsRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-          const allBids = [];
-          Object.keys(data).forEach(bidId => {
-            const bidData = data[bidId];
-            allBids.push({ id: bidId, ...bidData });
-          });
-          allBids.sort((a, b) => b.bidAmount - a.bidAmount);
-          setBids(allBids);
+        if (productSnapshot.exists()) {
+          const productData = productSnapshot.val();
+          setProductDetails(productData);
+
+          // Fetch bidders for the product
+          const biddersRef = dbRef(db, `bids/${productId}`);
+          const biddersSnapshot = await get(biddersRef);
+
+          if (biddersSnapshot.exists()) {
+            const biddersData = biddersSnapshot.val();
+            const biddersArray = Object.keys(biddersData).map((key, index) => ({
+              id: key,
+              bidAmount: biddersData[key].bidAmount,
+              bidTime: biddersData[key].bidTime,
+              userId: biddersData[key].userId,
+              userEmail: biddersData[key].userEmail,
+              status: biddersData[key].status || 'pending', // Fetch status or default to 'pending'
+              name: `Bidder ${index + 1}`,
+            }));
+            setBidders(biddersArray);
+          } else {
+            console.log('No bidders found for this product');
+          }
         } else {
-          setBids([]);
+          console.log('No product details available');
         }
-      });
+      } catch (error) {
+        console.error('Error fetching product details and bidders:', error);
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchProductDetails();
-    fetchBids();
   }, [productId]);
 
-  const handleBidPress = (bid) => {
-    setSelectedBid(bid);
-    setIsModalVisible(true);
+  const handleBidderPress = (bidder) => {
+    setSelectedBidder(bidder);
+    setModalVisible(true);
   };
 
-  const handleAcceptBid = async () => {
+  const updateBidStatus = async (status) => {
     try {
-      if (selectedBid) {
-        const bidRef = ref(database, `bids/${productId}/${selectedBid.id}`);
-        await update(bidRef, { status: 'accepted' });
+      const db = getDatabase();
+      const bidRef = dbRef(db, `bids/${productId}/${selectedBidder.id}`);
 
-        Alert.alert('Accept Bid', `Bid for ksh ${selectedBid.bidAmount} accepted.`);
+      // Update the selected bidder's status
+      await update(bidRef, { status });
+
+      // Update other bidders to 'rejected'
+      const otherBidders = bidders.filter(bidder => bidder.id !== selectedBidder.id);
+      for (let bidder of otherBidders) {
+        const otherBidRef = dbRef(db, `bids/${productId}/${bidder.id}`);
+        await update(otherBidRef, { status: 'rejected' });
       }
+
+      Alert.alert(`Bid ${status.charAt(0).toUpperCase() + status.slice(1)}`, `You have ${status} the bid from ${selectedBidder.name}`);
+      
+      // Update local state to reflect the changes
+      setBidders(prevBidders => 
+        prevBidders.map(bidder => 
+          bidder.id === selectedBidder.id 
+            ? { ...bidder, status } 
+            : { ...bidder, status: 'rejected' }
+        )
+      );
     } catch (error) {
       console.error('Error updating bid status:', error);
+    } finally {
+      setModalVisible(false);
     }
-    setIsModalVisible(false);
   };
 
-  const handleRejectBid = async () => {
-    try {
-      if (selectedBid) {
-        const bidRef = ref(database, `bids/${productId}/${selectedBid.id}`);
-        await update(bidRef, { status: 'rejected' });
-
-        Alert.alert('Reject Bid', `Bid for ksh ${selectedBid.bidAmount} rejected.`);
-      }
-    } catch (error) {
-      console.error('Error updating bid status:', error);
-    }
-    setIsModalVisible(false);
+  const handleAcceptBid = () => {
+    updateBidStatus('accepted');
   };
+
+  const handleDeclineBid = () => {
+    updateBidStatus('rejected');
+  };
+
+  if (loading) {
+    return <Text>Loading...</Text>;
+  }
 
   if (!productDetails) {
-    return <Text>Loading...</Text>;
+    return <Text>No product details found</Text>;
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Here is your ad progress, keep posting your ads and earn with us!</Text>
       <View style={styles.productCard}>
-        {productDetails.imageUrls && productDetails.imageUrls[0] && (
-          <Image source={{ uri: productDetails.imageUrls[0] }} style={styles.productImage} />
-        )}
-        <Text style={styles.productName}>{productDetails.productName}</Text>
-        <Text style={styles.productLocation}>
-          <FontAwesome name="map-marker" size={16} color={COLORS.primary} /> {productDetails.location}
-        </Text>
+        <Image source={{ uri: productDetails.imageUrls[0] }} style={styles.productImage} />
+        <Text style={styles.productTitle}>{productDetails.productName}</Text>
         <Text style={styles.productDescription}>{productDetails.productDescription}</Text>
-        <Text style={styles.productPrice}>Minimum Bid Price: ksh {productDetails.minimumBidPrice}</Text>
-        <Text style={styles.numberOfBidders}>Number of Bidders: {bids.length}</Text>
+        <Text style={styles.productLocation}>Location: {productDetails.location}</Text>
+        <Text style={styles.productBid}>Minimum Bid: {productDetails.minimumBidPrice}</Text>
       </View>
+      <FlatList
+        data={bidders}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <TouchableOpacity onPress={() => handleBidderPress(item)}>
+            <View style={[styles.bidderItem, item.status === 'accepted' ? styles.acceptedBidder : (item.status === 'rejected' ? styles.rejectedBidder : {})]}>
+              <Text>{item.name}</Text>
+              <Text>Bid Amount: {item.bidAmount}</Text>
+              <Text>Bid Time: {new Date(item.bidTime).toLocaleString()}</Text>
+              <Text>Status: {item.status.charAt(0).toUpperCase() + item.status.slice(1)}</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+      />
 
-      {bids.length === 0 ? (
-        <Text style={styles.noBiddersText}>No bidders</Text>
-      ) : (
-        <FlatList
-          data={bids}
-          renderItem={({ item, index }) => (
-            <TouchableOpacity onPress={() => handleBidPress(item)}>
-              <View style={styles.bidCard}>
-                <Text style={styles.bidderName}>{`${index + 1} Bidder`}</Text>
-                <Text style={styles.bidPrice}>Bid Price: ksh {item.bidAmount}</Text>
-              </View>
-            </TouchableOpacity>
-          )}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.bidsList}
-        />
-      )}
-
-      <Modal isVisible={isModalVisible}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Bid Action</Text>
-          {selectedBid && (
-            <>
-              <Text style={styles.modalText}>Bid Price: ksh {selectedBid.bidAmount}</Text>
-              <Pressable style={[styles.button, { backgroundColor: COLORS.primary }]} onPress={handleAcceptBid}>
-                <Text style={styles.buttonText}>Accept Bid</Text>
-              </Pressable>
-              <Pressable style={[styles.button, { backgroundColor: COLORS.primary }]} onPress={handleRejectBid}>
-                <Text style={styles.buttonText}>Reject Bid</Text>
-              </Pressable>
-              <Pressable style={[styles.button, { backgroundColor: COLORS.primary }]} onPress={() => setIsModalVisible(false)}>
-                <Text style={styles.buttonText}>Cancel</Text>
-              </Pressable>
-            </>
-          )}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => {
+          setModalVisible(!modalVisible);
+        }}
+      >
+        <View style={styles.modalView}>
+          <Text style={styles.modalText}>Do you want to accept or decline the bid from {selectedBidder?.name}?</Text>
+          <View style={styles.modalButtonContainer}>
+            <Button title="Accept" onPress={handleAcceptBid} />
+            <Button title="Decline" onPress={handleDeclineBid} />
+          </View>
+          <Button title="Cancel" color="red" onPress={() => setModalVisible(false)} />
         </View>
       </Modal>
     </View>
@@ -156,107 +155,87 @@ const ViewYourProductProgressScreen = ({ route, navigation }) => {
 
 const styles = StyleSheet.create({
   container: {
-    marginTop: 40,
     flex: 1,
     padding: 20,
-    backgroundColor: '#fff',
-  },
-  header: {
-    fontSize: 18,
-    color: COLORS.primary,
-    textAlign: 'center',
-    marginBottom: 20,
+    backgroundColor: '#f4f4f4',
   },
   productCard: {
     backgroundColor: '#fff',
-    borderRadius: 10,
     padding: 20,
+    borderRadius: 15,
     marginBottom: 20,
-    elevation: 3,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5,
   },
   productImage: {
-    width: '100%',
+    width: 200,
     height: 200,
-    borderRadius: 10,
-    marginBottom: 20,
+    borderRadius: 15,
+    marginBottom: 15,
   },
-  productName: {
+  productTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 10,
-  },
-  productLocation: {
-    fontSize: 16,
-    color: COLORS.primary,
-    marginBottom: 10,
+    textAlign: 'center',
   },
   productDescription: {
     fontSize: 16,
     marginBottom: 10,
-  },
-  productPrice: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  numberOfBidders: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 20,
-  },
-  bidsList: {
-    width: '100%',
-  },
-  bidCard: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 10,
-    elevation: 3,
-    justifyContent: 'space-between',
-  },
-  bidderName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  bidPrice: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-  },
-  noBiddersText: {
     textAlign: 'center',
+    color: '#555',
+  },
+  productLocation: {
     fontSize: 16,
-    color: COLORS.primary,
-    marginTop: 20,
+    marginBottom: 10,
+    fontWeight: '600',
   },
-  modalContent: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  modalTitle: {
+  productBid: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 20,
+    color: '#27ae60',
+  },
+  bidderItem: {
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    borderRadius: 5,
+    marginBottom: 10,
+  },
+  acceptedBidder: {
+    backgroundColor: '#d4edda',
+  },
+  rejectedBidder: {
+    backgroundColor: '#f8d7da',
+  },
+  modalView: {
+    margin: 20,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 35,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   modalText: {
-    fontSize: 16,
-    marginBottom: 30,
-  },
-  button: {
-    width: '80%',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
     marginBottom: 15,
+    textAlign: 'center',
+    fontSize: 18,
   },
-  buttonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 10,
   },
 });
 

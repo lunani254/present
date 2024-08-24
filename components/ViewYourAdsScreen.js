@@ -1,115 +1,77 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, Alert } from 'react-native';
-import { FontAwesome } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { ref, onValue, remove } from 'firebase/database';
-import { auth, database } from '../firebase';
-import COLORS from '../constants/colors';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
+import { getDatabase, ref as dbRef, get } from 'firebase/database';
+import { auth } from '../firebase';
 
-// Define the Ad type (just for reference, not needed in JS)
-const ViewYourAdsScreen = () => {
-  const [user, setUser] = useState(null);
-  const [userAds, setUserAds] = useState([]);
+const YourBidsScreen = () => {
+  const [bids, setBids] = useState([]);
+  const [loading, setLoading] = useState(true);
   const navigation = useNavigation();
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((authenticatedUser) => {
-      if (authenticatedUser) {
-        setUser(authenticatedUser);
-      } else {
-        setUser(null);
-      }
-    });
+    const fetchBids = async () => {
+      try {
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          const db = getDatabase();
+          const bidsRef = dbRef(db, 'bids/');
+          const snapshot = await get(bidsRef);
 
-    return () => unsubscribe();
+          if (snapshot.exists()) {
+            const bidsData = snapshot.val();
+            const userBidsArray = [];
+
+            Object.keys(bidsData).forEach(productId => {
+              Object.keys(bidsData[productId]).forEach(bidId => {
+                const bid = bidsData[productId][bidId];
+                if (bid.userId === currentUser.uid) {
+                  userBidsArray.push({
+                    id: bidId,
+                    productId,
+                    ...bid,
+                  });
+                }
+              });
+            });
+
+            setBids(userBidsArray);
+          } else {
+            console.log('No bids found');
+          }
+        } else {
+          console.log('No user is currently authenticated');
+        }
+      } catch (error) {
+        console.error('Error fetching bids:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBids();
   }, []);
 
-  useEffect(() => {
-    if (user) {
-      const fetchUserAds = () => {
-        const adsRef = ref(database, 'ads');
-        onValue(adsRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data) {
-            const userAdsArray = Object.keys(data)
-              .map(key => ({ id: key, productId: data[key].productId, ...data[key] }))
-              .filter(ad => ad.userId === user.uid);
-            setUserAds(userAdsArray);
-          } else {
-            setUserAds([]);
-          }
-        });
-      };
-
-      fetchUserAds();
-    } else {
-      setUserAds([]);
-    }
-  }, [user]);
-
-  const deleteAd = (adId) => {
-    Alert.alert(
-      'Confirm Delete',
-      'Are you sure you want to delete this ad?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Delete',
-          onPress: async () => {
-            try {
-              const adRef = ref(database, `ads/${adId}`);
-              await remove(adRef);
-              setUserAds((prevAds) => prevAds.filter((ad) => ad.id !== adId));
-              Alert.alert('Success', 'Ad deleted successfully');
-            } catch (error) {
-              console.error('Error removing ad: ', error);
-              Alert.alert('Error', 'Failed to delete the ad. Please try again.');
-            }
-          },
-          style: 'destructive',
-        },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  const renderItem = ({ item }) => (
-    <TouchableOpacity onPress={() => navigation.navigate('ViewYourProductProgressScreen', { productId: item.productId })}>
-      <View style={styles.productCard}>
-        {item.imageUrls && item.imageUrls[0] && (
-          <Image source={{ uri: item.imageUrls[0] }} style={styles.productImage} />
-        )}
-        <View style={styles.productInfo}>
-          <Text style={styles.productName}>{item.productName}</Text>
-          <Text style={styles.productLocation}>
-            <FontAwesome name="map-marker" size={16} color={COLORS.primary} /> {item.location}
-          </Text>
-          <Text style={styles.productPrice}>ksh {item.minimumBidPrice}</Text>
-          <Text style={styles.productDescription}>{item.productDescription}</Text>
-        </View>
-        <TouchableOpacity style={styles.deleteButton} onPress={() => deleteAd(item.id)}>
-          <Text style={styles.deleteButtonText}>Delete</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
+  if (loading) {
+    return <Text>Loading...</Text>;
+  }
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-        <Text style={styles.backButtonText}>Back</Text>
-      </TouchableOpacity>
-      <Text style={styles.header}>Your Ads</Text>
       <FlatList
-        data={userAds}
-        renderItem={renderItem}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.productList}
+        data={bids}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.bidItem}
+            onPress={() => navigation.navigate('ProductDetailsScreen', { productId: item.productId })}
+          >
+            <View style={styles.bidDetails}>
+              <Text style={styles.bidTitle}>{item.productName}</Text>
+              <Text>Bid Amount: {item.bidAmount}</Text>
+            </View>
+          </TouchableOpacity>
+        )}
       />
     </View>
   );
@@ -118,83 +80,24 @@ const ViewYourAdsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 40,
-    backgroundColor: '#fff',
+    padding: 20,
   },
-  backButton: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    paddingHorizontal: 15,
-    paddingVertical: 5,
-    zIndex: 1,
-    backgroundColor: `${COLORS.primary}90`,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.1)',
-  },
-  backButtonText: {
-    color: 'white',
-    fontSize: 16,
-  },
-  header: {
-    fontSize: 24,
-    color: COLORS.primary,
-    marginBottom: 20,
-    textAlign: 'center',
-    marginTop: 40,
-  },
-  productList: {
-    width: '100%',
-  },
-  productCard: {
+  bidItem: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f8f8',
+    padding: 15,
+    marginBottom: 10,
     borderRadius: 10,
-    marginBottom: 20,
-    padding: 10,
-    marginHorizontal: 10,
-    alignItems: 'center',
-    elevation: 3,
   },
-  productImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginRight: 15,
-  },
-  productInfo: {
+  bidDetails: {
     flex: 1,
+    justifyContent: 'center',
   },
-  productName: {
+  bidTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 5,
   },
-  productLocation: {
-    fontSize: 14,
-    color: COLORS.primary,
-    marginBottom: 5,
-  },
-  productPrice: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  productDescription: {
-    fontSize: 14,
-  },
-  deleteButton: {
-    backgroundColor: 'red',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 10,
-  },
-  deleteButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
 });
 
-export default ViewYourAdsScreen;
+export default YourBidsScreen;

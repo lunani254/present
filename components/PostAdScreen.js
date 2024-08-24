@@ -251,14 +251,14 @@ const PostAdScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 30,
+    paddingTop: 50, // Adjust this value as needed
   },
   backButton: {
     position: 'absolute',
-    top: 10,
+    top: 30, // Increased value to move the button down
     left: 10,
     paddingHorizontal: 15,
     paddingVertical: 5,
